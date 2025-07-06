@@ -5,7 +5,7 @@ rtmp:
   port: 1935
 
 hls:
-  output_dir: "./hls"
+  output_dir: "./output"
   segment_duration: 4
   playlist_window: 10
 

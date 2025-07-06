@@ -96,6 +96,9 @@ func (s *Server) setupRoutes(router *gin.Engine) {
 	router.GET("/hls/:app/:stream/playlist.m3u8", s.servePlaylist)
 	router.GET("/hls/:app/:stream/:segment", s.serveSegment)
 
+	router.GET("/stream.m3u8", s.serveDirectPlaylist)
+	router.GET("/segment_:segment", s.serveDirectSegment)
+
 	router.GET("/health", s.healthCheck)
 }
 
@@ -237,6 +240,61 @@ func (s *Server) serveSegment(c *gin.Context) {
 	c.Header("Accept-Ranges", "bytes")
 
 	http.ServeContent(c.Writer, c.Request, segment, stat.ModTime(), file)
+}
+
+func (s *Server) serveDirectPlaylist(c *gin.Context) {
+	playlistPath := filepath.Join(s.hlsOutputDir, "stream.m3u8")
+
+	if _, err := os.Stat(playlistPath); os.IsNotExist(err) {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Playlist not found"})
+		return
+	}
+
+	c.Header("Content-Type", "application/vnd.apple.mpegurl")
+	c.Header("Access-Control-Allow-Origin", "*")
+	c.Header("Access-Control-Allow-Methods", "GET, OPTIONS")
+	c.Header("Access-Control-Allow-Headers", "Content-Type")
+
+	c.File(playlistPath)
+}
+
+func (s *Server) serveDirectSegment(c *gin.Context) {
+	segment := c.Param("segment")
+
+	if !strings.HasSuffix(segment, ".ts") {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid segment file"})
+		return
+	}
+
+	segmentPath := filepath.Join(s.hlsOutputDir, "segment_"+segment)
+
+	if _, err := os.Stat(segmentPath); os.IsNotExist(err) {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Segment not found"})
+		return
+	}
+
+	c.Header("Content-Type", "video/mp2t")
+	c.Header("Access-Control-Allow-Origin", "*")
+	c.Header("Access-Control-Allow-Methods", "GET, OPTIONS")
+	c.Header("Access-Control-Allow-Headers", "Content-Type, Range")
+
+	file, err := os.Open(segmentPath)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to open segment file"})
+		return
+	}
+	defer file.Close()
+
+	stat, err := file.Stat()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get file info"})
+		return
+	}
+
+	c.Header("Content-Length", strconv.FormatInt(stat.Size(), 10))
+	c.Header("Accept-Ranges", "bytes")
+
+	http.ServeContent(c.Writer, c.Request, "segment_"+segment, stat.ModTime(), file)
 }
 
 func (s *Server) healthCheck(c *gin.Context) {
